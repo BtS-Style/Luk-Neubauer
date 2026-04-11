@@ -1,0 +1,9 @@
+{
+  "name": "Remix: BTS Protocol: Nexus",
+  "description": "Sjednocená entita a komunikační uzel protokolu BTS. Místo, kde se technologie, design a vize Architekta propojují v jeden celek.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
