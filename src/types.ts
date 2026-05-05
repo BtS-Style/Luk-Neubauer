@@ -24,6 +24,18 @@ export interface AIAutonomySettings {
   vocalImprintSync: boolean;
 }
 
+export interface BTSNotification {
+  id: string | number;
+  userId: string;
+  type: "mention" | "reply" | "group_invite" | "ai_insight" | "system";
+  senderName: string;
+  senderPic?: string | null;
+  content: string;
+  link?: string;
+  read: boolean;
+  timestamp: number;
+}
+
 export interface User {
   id?: string;
   name: string;
@@ -67,6 +79,8 @@ export interface Post {
   vocalImprint?: string | null;
   aiInsight?: string | null;
   groupId?: string | null;
+  mentionedAIId?: string | null;
+  aiResponse?: string | null;
   customStyle?: string | null;
   files?: { name: string; type: string; url: string | null }[];
 }

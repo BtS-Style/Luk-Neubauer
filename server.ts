@@ -166,36 +166,55 @@ async function startServer() {
 
   // OAuth Routes
   app.get("/api/auth/url", (req, res) => {
+    try {
     const provider = req.query.provider;
-    const appUrl = process.env.APP_URL || `http://localhost:${PORT}`;
+    const appUrl = process.env.APP_URL || process.env.VITE_APP_URL || `http://localhost:${PORT}`;
     
-    if (provider === "google") {
-      const clientId = process.env.VITE_GOOGLE_CLIENT_ID;
-      if (!clientId) return res.status(400).json({ error: "Google Client ID not configured" });
-      
-      const params = new URLSearchParams({
-        client_id: clientId,
-        redirect_uri: `${appUrl}/auth/callback`,
-        response_type: "code",
-        scope: "openid profile email",
-        access_type: "offline",
-        prompt: "consent"
-      });
-      res.json({ url: `https://accounts.google.com/o/oauth2/v2/auth?${params}` });
-    } else if (provider === "facebook") {
-      const clientId = process.env.VITE_FACEBOOK_CLIENT_ID;
-      if (!clientId) return res.status(400).json({ error: "Facebook Client ID not configured" });
-      
-      const params = new URLSearchParams({
-        client_id: clientId,
-        redirect_uri: `${appUrl}/auth/callback`,
-        response_type: "code",
-        scope: "email,public_profile",
-        display: "popup"
-      });
-      res.json({ url: `https://www.facebook.com/v18.0/dialog/oauth?${params}` });
-    } else {
-      res.status(400).json({ error: "Unsupported provider" });
+    console.log(`[OAuth] Requesting URL for provider: ${provider}`);
+
+      if (provider === "google") {
+        const clientId = process.env.VITE_GOOGLE_CLIENT_ID;
+        if (!clientId || clientId === "YOUR_GOOGLE_CLIENT_ID" || clientId === "") {
+          console.warn("[OAuth] Google Client ID not configured");
+          return res.status(400).json({ 
+            error: "Google Client ID not configured",
+            details: "Please set VITE_GOOGLE_CLIENT_ID in your environment variables."
+          });
+        }
+        
+        const params = new URLSearchParams({
+          client_id: clientId,
+          redirect_uri: `${appUrl}/auth/callback`,
+          response_type: "code",
+          scope: "openid profile email",
+          access_type: "offline",
+          prompt: "consent"
+        });
+        res.json({ url: `https://accounts.google.com/o/oauth2/v2/auth?${params}` });
+      } else if (provider === "facebook") {
+        const clientId = process.env.VITE_FACEBOOK_CLIENT_ID;
+        if (!clientId || clientId === "YOUR_FACEBOOK_CLIENT_ID" || clientId === "") {
+          console.warn("[OAuth] Facebook Client ID not configured");
+          return res.status(400).json({ 
+            error: "Facebook Client ID not configured",
+            details: "Please set VITE_FACEBOOK_CLIENT_ID in your environment variables."
+          });
+        }
+        
+        const params = new URLSearchParams({
+          client_id: clientId,
+          redirect_uri: `${appUrl}/auth/callback`,
+          response_type: "code",
+          scope: "email,public_profile",
+          display: "popup"
+        });
+        res.json({ url: `https://www.facebook.com/v18.0/dialog/oauth?${params}` });
+      } else {
+        res.status(400).json({ error: "Unsupported provider" });
+      }
+    } catch (error: any) {
+      console.error("[OAuth Error]", error);
+      res.status(500).json({ error: "Internal Server Error", details: error.message });
     }
   });
 
@@ -222,14 +241,21 @@ async function startServer() {
 
   // API Routes
   app.get("/api/posts", (req, res) => {
-    const posts = db.prepare(`
-      SELECT p.*, u.name as author_name, u.picture as author_pic 
-      FROM posts p 
-      JOIN users u ON p.author_id = u.id 
-      WHERE p.group_id IS NULL 
-      ORDER BY p.created_at DESC
-    `).all();
-    res.json(posts);
+    try {
+      console.log("[API] Fetching posts...");
+      const posts = db.prepare(`
+        SELECT p.*, u.name as author_name, u.picture as author_pic 
+        FROM posts p 
+        LEFT JOIN users u ON p.author_id = u.id 
+        WHERE p.group_id IS NULL 
+        ORDER BY p.created_at DESC
+      `).all();
+      console.log(`[API] Found ${posts.length} posts`);
+      res.json(posts);
+    } catch (error: any) {
+      console.error("[API Error] Failed to fetch posts:", error);
+      res.status(500).json({ error: "Failed to fetch posts", details: error.message });
+    }
   });
 
   app.post("/api/posts", (req, res) => {

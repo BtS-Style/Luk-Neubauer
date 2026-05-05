@@ -13,12 +13,12 @@ import {
   Lock, UserPlus, Zap, Hash, TrendingUp, RefreshCw, Key,
   ArrowLeft, Paperclip, ThumbsUp, Star, Edit3, Trash2,
   ChevronDown, Check, AlertCircle, Download, MapPin, Calendar, Facebook, Lightbulb, Filter, SlidersHorizontal,
-  ShieldAlert, Brain
+  ShieldAlert, Brain, Shield, Type
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import Markdown from "react-markdown";
 import Dexie, { type Table } from "dexie";
-import { User as UserType, Post, Comment, Story, Friend, LibraryItem, AIAssistant, Group, AIAutonomySettings } from "@/src/types";
+import { User as UserType, Post, Comment, Story, Friend, LibraryItem, AIAssistant, Group, AIAutonomySettings, BTSNotification } from "@/src/types";
 import { 
   generateCaption, 
   chatWithAI, 
@@ -59,17 +59,20 @@ const T = {
   muted:   "rgba(255,255,255,0.15)",
 };
 
-const LOGO_URL = "https://i.ibb.co/v6YpP6C/bts-logo.png"; // Updated to the BTS with wings logo
+const LOGO_URL = "https://i.ibb.co/v6YpP6C/bts-logo.png";
 
 function AppLogo({ size = 40, className = "" }: { size?: number, className?: string }) {
   return (
-    <img 
-      src={LOGO_URL} 
-      alt="BTS Logo" 
-      style={{ width: size, height: size, objectFit: "contain" }} 
-      className={`drop-shadow-[0_0_10px_${T.purple}80] ${className}`}
-      referrerPolicy="no-referrer"
-    />
+    <div className={`relative flex items-center justify-center ${className}`} style={{ width: size, height: size }}>
+      <div className="absolute inset-0 bg-purple-500/20 blur-xl rounded-full animate-pulse" />
+      <img 
+        src={LOGO_URL} 
+        alt="BTS Logo" 
+        style={{ width: size, height: size, objectFit: "contain" }} 
+        className="relative z-10 drop-shadow-[0_0_15px_rgba(157,92,255,0.6)]"
+        referrerPolicy="no-referrer"
+      />
+    </div>
   );
 }
 
@@ -138,13 +141,15 @@ class BTSDatabase extends Dexie {
   protocol_data!: Table<ProtocolData>;
   vocal_imprint!: Table<any>;
   ethical_ledger!: Table<any>;
+  notifications!: Table<any>;
 
   constructor() {
     super('BTS_BotSync_Database');
-    this.version(1).stores({
-      protocol_data: '++id, key, timestamp', // Indexujeme klíč a čas pro rychlé vyhledávání
-      vocal_imprint: '++id, label',          // Speciální úložiště pro vokální stopu
-      ethical_ledger: '++id, priority'       // Etické postoje k systému
+    this.version(2).stores({
+      protocol_data: '++id, key, timestamp',
+      vocal_imprint: '++id, label',
+      ethical_ledger: '++id, priority',
+      notifications: '++id, userId, read, timestamp'
     });
   }
 }
@@ -205,6 +210,133 @@ const AI_PERSONAS = AI_MODELS; // Alias for backward compatibility if needed
 
 const ACCEPT_TYPES = ".mp3,.mp4,.jpg,.jpeg,.png,.psd,.txt,.pdf,.gif,.webp";
 
+const useNotifications = (userId: string | undefined) => {
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const fetchNotifications = useCallback(async () => {
+    if (!userId) return;
+    try {
+      const all = await bts_db.notifications.where('userId').equals(userId).reverse().sortBy('timestamp');
+      setNotifications(all);
+      const unread = all.filter(n => !n.read).length;
+      setUnreadCount(unread);
+    } catch (err) {
+      console.error(err);
+    }
+  }, [userId]);
+
+  const addNotification = async (n: { userId?: string, type: string, senderName: string, senderPic?: string, content: string, link?: string }) => {
+    const targetId = n.userId || userId;
+    if (!targetId) return;
+    const newNotif = {
+      ...n,
+      userId: targetId,
+      read: false,
+      timestamp: Date.now()
+    };
+    await bts_db.notifications.add(newNotif);
+    await fetchNotifications();
+  };
+
+  const markAsRead = async (id: number) => {
+    await bts_db.notifications.update(id, { read: true });
+    await fetchNotifications();
+  };
+
+  const markAllAsRead = async () => {
+    if (!userId) return;
+    await bts_db.notifications.where('userId').equals(userId).modify({ read: true });
+    await fetchNotifications();
+  };
+
+  useEffect(() => {
+    fetchNotifications();
+  }, [fetchNotifications]);
+
+  return { notifications, unreadCount, addNotification, markAsRead, markAllAsRead };
+};
+
+/* ══════════════════════════════════════════════════════════
+   NOTIFICATION CENTER
+══════════════════════════════════════════════════════════ */
+function NotificationCenter({ 
+  onClose, 
+  notifications, 
+  onMarkRead, 
+  onMarkAllRead 
+}: { 
+  onClose: () => void, 
+  notifications: BTSNotification[], 
+  onMarkRead: (id: number) => void, 
+  onMarkAllRead: () => void 
+}) {
+  return (
+    <motion.div 
+      initial={{ opacity: 0, scale: 0.95, y: -20 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.95, y: -20 }}
+      className="absolute top-16 right-4 sm:right-20 w-[320px] bg-[#0f0f1a]/95 backdrop-blur-xl border border-white/10 rounded-3xl shadow-[0_32px_64px_-16px_rgba(0,0,0,0.5)] z-[300] overflow-hidden"
+    >
+      <div className="p-5 border-b border-white/5 flex items-center justify-between bg-white/5">
+        <h3 className="text-[10px] font-black uppercase tracking-widest text-white/40 flex items-center gap-2">
+          <Bell size={12} className="text-purple-400" /> Aktuální Centrála
+        </h3>
+        <div className="flex gap-4">
+          <button onClick={onMarkAllRead} className="text-[9px] text-cyan-400 hover:text-cyan-300 font-bold uppercase tracking-wider transition-all">Přečíst vše</button>
+          <button onClick={onClose} className="text-white/40 hover:text-white transition-all"><X size={14} /></button>
+        </div>
+      </div>
+      <div className="max-h-[450px] overflow-y-auto custom-scrollbar">
+        {notifications.length === 0 ? (
+          <div className="p-12 text-center flex flex-col items-center gap-4">
+            <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center">
+              <Bell size={28} className="text-white/10" />
+            </div>
+            <p className="text-[10px] text-white/20 font-bold uppercase tracking-widest leading-relaxed">
+              Žádné nové impulzy v Nexus síti
+            </p>
+          </div>
+        ) : (
+          notifications.map((n: any) => (
+            <div 
+              key={n.id} 
+              onClick={() => onMarkRead(n.id)}
+              className={`p-5 border-b border-white/5 flex gap-4 hover:bg-white/5 transition-all cursor-pointer relative group ${!n.read ? 'bg-purple-500/5' : ''}`}
+            >
+              <Avatar name={n.senderName} pic={n.senderPic} size={36} color={n.type === 'ai_insight' ? T.cyan : T.purple} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="text-xs font-bold text-white truncate group-hover:text-purple-400 transition-colors">{n.senderName}</span>
+                  <span className="text-[8px] text-white/20 font-mono">
+                    {new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+                <p className="text-[11px] text-white/50 leading-relaxed line-clamp-2 italic font-serif">"{n.content}"</p>
+                <div className="mt-2.5 flex items-center gap-2">
+                  <span className={`px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-widest border transition-all ${
+                    n.type === 'mention' ? 'bg-purple-500/10 border-purple-500/30 text-purple-400' :
+                    n.type === 'ai_insight' ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' :
+                    n.type === 'reply' ? 'bg-pink-500/10 border-pink-500/30 text-pink-400' :
+                    'bg-white/5 border-white/10 text-white/30'
+                  }`}>
+                    {n.type === 'ai_insight' && <Sparkles size={8} className="inline mr-1" />}
+                    {n.type}
+                  </span>
+                </div>
+              </div>
+              {!n.read && <div className="absolute top-5 right-2 w-2 h-2 rounded-full bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.5)]" />}
+            </div>
+          ))
+        )}
+      </div>
+      <div className="p-4 bg-white/5 border-t border-white/5 text-center">
+        <button onClick={onClose} className="text-[9px] text-white/20 font-bold uppercase tracking-widest hover:text-white transition-all">Zavřít centrálu</button>
+      </div>
+    </motion.div>
+  );
+}
+
 /* ══════════════════════════════════════════════════════════
    UTILS
 ══════════════════════════════════════════════════════════ */
@@ -247,7 +379,7 @@ function Avatar({ name, pic, size = 38, color = T.purple, online, className }: {
    LOGIN SCREEN
 ══════════════════════════════════════════════════════════ */
 function LoginScreen({ onLogin }: { onLogin: (u: UserType) => void }) {
-  const [tab, setTab] = useState<"login" | "register">("login");
+  const [tab, setTab] = useState<"login" | "register" | "demo">("login");
   const [email, setEmail] = useState("Bellapiskota@gmail.com");
   const [name, setName] = useState("");
   const [loading, setLoading] = useState("");
@@ -334,11 +466,11 @@ function LoginScreen({ onLogin }: { onLogin: (u: UserType) => void }) {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-5" style={{
-      background: `radial-gradient(ellipse at 20% 20%, ${T.purple}22 0%, transparent 50%), radial-gradient(ellipse at 80% 80%, ${T.cyan}18 0%, transparent 50%), ${T.bg}`,
-    }}>
+    <div className="min-h-screen flex items-center justify-center p-5 relative overflow-hidden">
+      <div className="aura-bg" />
+      
       {/* Admin Bypass Button (Hidden Logo) */}
-      <div className="absolute top-8 left-8">
+      <div className="absolute top-8 left-8 z-50">
         <button onClick={handleAdminBypass} className="hover:scale-110 transition-transform active:scale-95">
           <AppLogo size={48} />
         </button>
@@ -368,18 +500,32 @@ function LoginScreen({ onLogin }: { onLogin: (u: UserType) => void }) {
             </div>
           </div>
           <div className="flex gap-1 mb-6 bg-white/5 p-1 rounded-xl">
-            {["login", "register"].map((m) => (
+            {["login", "register", "demo"].map((m) => (
               <button
                 key={m}
                 onClick={() => setTab(m as any)}
                 className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${tab === m ? 'bg-white/10 text-white shadow-sm' : 'text-white/40 hover:text-white/60'}`}
               >
-                {m === "login" ? "Přihlásit se" : "Registrovat"}
+                {m === "login" ? "Přihlásit se" : m === "register" ? "Registrovat" : "Demo"}
               </button>
             ))}
           </div>
 
-          {tab === "register" && (
+          {tab === "demo" && (
+            <div className="mb-6 text-center">
+              <p className="text-xs text-white/40 mb-4">
+                Nemáš nakonfigurovaný OAuth? Použij demo přístup pro testování Nexus protokolu.
+              </p>
+              <button
+                onClick={handleAdminBypass}
+                className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white font-bold py-3 rounded-xl shadow-lg transition-all active:scale-[0.98]"
+              >
+                Vstoupit jako Architekt
+              </button>
+            </div>
+          )}
+
+          {tab !== "demo" && tab === "register" && (
             <div className="mb-4">
               <input
                 value={name}
@@ -456,7 +602,7 @@ function LoginScreen({ onLogin }: { onLogin: (u: UserType) => void }) {
 /* ══════════════════════════════════════════════════════════
    CREATE POST MODAL
 ══════════════════════════════════════════════════════════ */
-function CreatePostModal({ user, onClose, onPost, initialText = "", groups = [] }: { user: UserType, onClose: () => void, onPost: (p: Post, groupId?: string | null) => void, initialText?: string, groups?: Group[] }) {
+function CreatePostModal({ user, onClose, onPost, onAddNotification, initialText = "", groups = [] }: { user: UserType, onClose: () => void, onPost: (p: Post, groupId?: string | null) => void, onAddNotification?: (notif: Omit<BTSNotification, 'id' | 'timestamp' | 'read'>) => void, initialText?: string, groups?: Group[] }) {
   const [text, setText] = useState(initialText);
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -474,6 +620,7 @@ function CreatePostModal({ user, onClose, onPost, initialText = "", groups = [] 
   const [privacy, setPrivacy] = useState<"public" | "friends" | "private">("public");
   const [analysis, setAnalysis] = useState<{ description: string, captions: string[], hashtags: string[] } | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [mentionedAI, setMentionedAI] = useState<string | null>(null);
 
   useEffect(() => {
     const loadDraft = async () => {
@@ -563,7 +710,7 @@ function CreatePostModal({ user, onClose, onPost, initialText = "", groups = [] 
     if (!aiPrompt.trim()) return;
     setGenLoading(true);
     try {
-      const url = await generateAIVideo(aiPrompt, highQuality);
+      const url = await generateAIVideo(aiPrompt);
       if (url) {
         setVideoUrl(url);
         setPostType("reel");
@@ -574,21 +721,24 @@ function CreatePostModal({ user, onClose, onPost, initialText = "", groups = [] 
     setGenLoading(false);
   };
 
-  const handleGenerateCaption = async () => {
+  const handleAiCaption = async () => {
+    if (!text && !imgUrl) return;
     setAiCaptionLoading(true);
     try {
-      const ctx = text || aiPrompt || "nový příspěvek na sociální síti";
-      const res = await generateCaption(ctx);
+      const prompt = imgUrl ? `Vytvoř krátký, úderný popisek k tomuto obrázku: ${analysis?.description || aiPrompt}` : `Vylepši tento text pro sociální sítě: ${text}`;
+      const res = await generateCaption(prompt);
       if (res) setText(res);
-    } catch {}
+    } catch (err) {
+      console.error(err);
+    }
     setAiCaptionLoading(false);
   };
 
-  const handleGenerateInsight = async () => {
+  const handleInsight = async () => {
     if (!text.trim()) return;
     setInsightLoading(true);
     try {
-      const res = await generateAIInsight(text);
+      const res = await generateAIInsight(`Analyzuj tento text a dej mi 3 krátké postřehy, jak ho vylepšit pro větší dosah: ${text}`);
       if (res) setTextInsight(res);
     } catch (err) {
       console.error(err);
@@ -596,376 +746,263 @@ function CreatePostModal({ user, onClose, onPost, initialText = "", groups = [] 
     setInsightLoading(false);
   };
 
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingProgress, setRecordingProgress] = useState(0);
-  const [vocalImprint, setVocalImprint] = useState<string | null>(null);
-
-  const handleRecord = () => {
-    setIsRecording(true);
-    setRecordingProgress(0);
-    const duration = 15000; // 15s
-    const interval = 100;
-    const steps = duration / interval;
-    let currentStep = 0;
-
-    const timer = setInterval(() => {
-      currentStep++;
-      setRecordingProgress((currentStep / steps) * 100);
-      if (currentStep >= steps) {
-        clearInterval(timer);
-        setIsRecording(false);
-        setVocalImprint("BTS_SIG_" + Math.random().toString(36).substring(7).toUpperCase() + "_VERIFIED");
+  const handleSubmit = async () => {
+    if (!text.trim() && !imgUrl && !videoUrl) return;
+    
+    let aiResponse = null;
+    if (mentionedAI) {
+      setInsightLoading(true);
+      try {
+        const aiInfo = AI_MODELS[mentionedAI as keyof typeof AI_MODELS];
+        const res = await chatWithAI(
+          [{ role: 'user', content: `Můj přítel tě označil v příspěvku: "${text}". Reaguj jako ${aiInfo.name} (${aiInfo.desc}). Buď krátký a věcný.` }],
+          mentionedAI
+        );
+        if (res) {
+          aiResponse = res;
+          if (onAddNotification) {
+            onAddNotification({
+              userId: user.sub,
+              type: "mention",
+              senderName: aiInfo.name,
+              senderPic: `https://picsum.photos/seed/${mentionedAI}/100/100`,
+              content: `AI ${aiInfo.name} reagoval na tvé označení v příspěvku.`,
+              link: "#"
+            });
+          }
+        }
+      } catch (err) {
+        console.error("AI Mention failed", err);
       }
-    }, interval);
-  };
+      setInsightLoading(true);
+    }
 
-  const handlePost = () => {
-    if (!text.trim() && !imgUrl && !videoUrl && !vocalImprint) return;
-    localStorage.removeItem("netbook_post_draft");
-    onPost({
+    const p: Post = {
       id: Date.now(),
       authorId: user.sub,
       authorName: user.name,
       authorPic: user.picture,
       content: text,
-      image: imgUrl,
-      video: videoUrl,
-      type: postType,
+      image: imgUrl || undefined,
+      video: videoUrl || undefined,
+      timestamp: Date.now(),
       likes: 0,
       comments: [],
       shares: 0,
-      saved: false,
       liked: false,
-      time: "právě teď",
-      timestamp: Date.now(),
-      duration: postType === "reel" ? Math.floor(Math.random() * 60) + 5 : undefined, // Mock duration for reels
-      privacy,
-      vocalImprint,
-      aiInsight: textInsight || analysis?.description || null,
-      groupId: selectedGroupId
-    }, selectedGroupId);
+      saved: false,
+      type: postType,
+      privacy: privacy,
+      time: "Právě teď",
+      groupId: selectedGroupId,
+      mentionedAIId: mentionedAI,
+      aiResponse: aiResponse
+    };
+    onPost(p, selectedGroupId);
+    deleteFromNexus("netbook_post_draft");
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={e => e.target === e.currentTarget && onClose()}>
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+    >
       <motion.div 
-        initial={{ y: 100, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        className="w-full max-w-xl bg-[#12121e] rounded-t-3xl sm:rounded-3xl border border-white/10 overflow-hidden h-[90vh] sm:h-auto max-h-[90vh] flex flex-col"
+        initial={{ scale: 0.9, y: 20 }}
+        animate={{ scale: 1, y: 0 }}
+        className="glass-dark w-full max-w-2xl rounded-[2.5rem] border border-white/10 overflow-hidden shadow-2xl flex flex-col max-h-[90vh]"
       >
-        <div className="p-5 border-bottom border-white/10 flex items-center justify-between">
-          <h2 className="text-lg font-bold text-white">Vytvořit obsah</h2>
-          <button onClick={onClose} className="text-white/40 hover:text-white"><X size={20} /></button>
+        <div className="p-6 border-b border-white/5 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-purple-500/20 flex items-center justify-center">
+              <Plus className="text-purple-400" size={20} />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-white">Nový příspěvek</h3>
+              <p className="text-[10px] text-white/30 uppercase tracking-widest">Nexus Protocol · Kreativní Studio</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-10 h-10 rounded-full hover:bg-white/5 flex items-center justify-center text-white/40 hover:text-white transition-all">
+            <X size={20} />
+          </button>
         </div>
 
-        <div className="p-6 overflow-y-auto flex-1 flex flex-col gap-6">
-          <div className="flex gap-2">
-            {(["post", "reel", "story"] as const).map(type => (
-              <button
-                key={type}
-                onClick={() => setPostType(type)}
-                className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all border ${postType === type ? 'bg-purple-500/10 border-purple-500/50 text-purple-400' : 'bg-white/5 border-white/10 text-white/40'}`}
-              >
-                {type === "post" ? "📝 Příspěvek" : type === "reel" ? "🎬 Reel" : "📖 Story"}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-3">
-            <Avatar name={user.name} pic={user.picture} size={44} />
-            <div>
-              <div className="text-sm font-bold text-white">{user.name}</div>
-              <div className="flex gap-1 mt-1">
-                {(["public", "friends", "private"] as const).map(p => (
-                  <button
-                    key={p}
-                    onClick={() => setPrivacy(p)}
-                    className={`px-3 py-1 rounded-full text-[10px] font-bold transition-all border ${privacy === p ? 'bg-cyan-500/10 border-cyan-500/50 text-cyan-400' : 'bg-white/5 border-white/10 text-white/30'}`}
+        <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-hide">
+          <div className="flex gap-4">
+            <Avatar name={user.name} pic={user.picture} size={48} />
+            <div className="flex-1 space-y-4">
+              <div className="flex flex-wrap gap-2">
+                {groups.length > 0 && (
+                  <select 
+                    value={selectedGroupId || ""}
+                    onChange={(e) => setSelectedGroupId(e.target.value || null)}
+                    className="bg-white/5 border border-white/10 rounded-full px-3 py-1 text-[10px] text-white/60 outline-none hover:border-purple-500/30 transition-all font-bold uppercase tracking-wider"
                   >
-                    {p === "public" ? "🌍 Veřejný" : p === "friends" ? "👥 Přátelé" : "🔒 Soukromý"}
+                    <option value="" className="bg-[#0a0a0a]">Veřejný kanál</option>
+                    {groups.map(g => (
+                      <option key={g.id} value={g.id} className="bg-[#0a0a0a]">{g.name}</option>
+                    ))}
+                  </select>
+                )}
+                
+                <select 
+                  value={mentionedAI || ""}
+                  onChange={(e) => setMentionedAI(e.target.value || null)}
+                  className="bg-white/5 border border-white/10 rounded-full px-3 py-1 text-[10px] text-white/60 outline-none hover:border-cyan-500/30 transition-all font-bold uppercase tracking-wider"
+                >
+                  <option value="" className="bg-[#0a0a0a]">Označit AI...</option>
+                  {Object.entries(AI_MODELS).map(([key, ai]) => (
+                    <option key={key} value={key} className="bg-[#0a0a0a]">{ai.name}</option>
+                  ))}
+                </select>
+
+                <select 
+                  value={privacy}
+                  onChange={(e) => setPrivacy(e.target.value as any)}
+                  className="bg-white/5 border border-white/10 rounded-full px-3 py-1 text-[10px] text-white/60 outline-none hover:border-green-500/30 transition-all font-bold uppercase tracking-wider ml-auto"
+                >
+                  <option value="public" className="bg-[#0a0a0a]">Veřejné</option>
+                  <option value="friends" className="bg-[#0a0a0a]">Přátelé</option>
+                  <option value="private" className="bg-[#0a0a0a]">Soukromé</option>
+                </select>
+              </div>
+
+              <textarea 
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder="Co máš na srdci, Architekte?"
+                className="w-full bg-transparent text-white text-lg outline-none resize-none min-h-[120px] placeholder:text-white/20 font-medium"
+              />
+              
+              <div className="flex flex-wrap gap-2">
+                {["post", "reel", "story"].map(t => (
+                  <button 
+                    key={t}
+                    onClick={() => setPostType(t as any)}
+                    className={`px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all border ${postType === t ? 'bg-purple-500 border-purple-500 text-white shadow-lg shadow-purple-500/20' : 'bg-white/5 border-white/10 text-white/40 hover:text-white/60'}`}
+                  >
+                    {t}
                   </button>
                 ))}
               </div>
             </div>
           </div>
 
-            <div className="relative">
-              <textarea
-                value={text}
-                onChange={e => setText(e.target.value)}
-                placeholder="Co máš na mysli?"
-                className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-white text-sm min-h-[120px] outline-none focus:border-purple-500/30 transition-all resize-none"
-              />
-              <div className="absolute bottom-3 right-3 flex gap-2">
-                <button
-                  onClick={handleGenerateInsight}
-                  disabled={insightLoading || !text.trim()}
-                  className="px-3 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-[10px] font-bold flex items-center gap-2 hover:bg-cyan-500/20 transition-all disabled:opacity-50"
-                >
-                  {insightLoading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-                  AI Analýza
-                </button>
-                <button
-                  onClick={handleGenerateCaption}
-                  disabled={aiCaptionLoading}
-                  className="px-3 py-1.5 rounded-full bg-purple-500/10 border border-purple-500/30 text-purple-400 text-[10px] font-bold flex items-center gap-2 hover:bg-purple-500/20 transition-all"
-                >
-                  {aiCaptionLoading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-                  AI Popisek
-                </button>
-              </div>
-            </div>
-
-            {textInsight && (
-              <motion.div 
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-cyan-500/5 border border-cyan-500/20 rounded-2xl p-4 flex flex-col gap-2"
-              >
-                <div className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest flex items-center gap-2">
-                  <Sparkles size={12} /> AI Insight (Textová analýza)
-                </div>
-                <div className="text-xs text-white/60 leading-relaxed italic">
-                  "{textInsight}"
-                </div>
-              </motion.div>
-            )}
-
           {(imgUrl || videoUrl) && (
-            <div className="flex flex-col gap-4">
-              <div className="relative rounded-2xl overflow-hidden border border-white/10 group">
-                {imgUrl && <img src={imgUrl} className="w-full max-h-[300px] object-cover" alt="AI Generated" />}
-                {videoUrl && <video src={videoUrl} className="w-full max-h-[300px] object-cover" controls autoPlay loop />}
-                <button 
-                  onClick={() => { setImgUrl(null); setVideoUrl(null); setAnalysis(null); }}
-                  className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-
-              {analyzing && (
-                <div className="flex items-center gap-3 p-4 bg-white/5 border border-white/10 rounded-2xl">
-                  <Loader2 size={16} className="animate-spin text-cyan-400" />
-                  <span className="text-xs text-white/40 font-bold uppercase tracking-widest">AI analyzuje vizuál...</span>
-                </div>
-              )}
-
-              {analysis && (
-                <motion.div 
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-cyan-500/5 border border-cyan-500/20 rounded-2xl p-4 flex flex-col gap-3"
-                >
-                  <div className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest flex items-center gap-2">
-                    <Sparkles size={12} /> AI Insight: {analysis.description}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {analysis.captions.map((c, i) => (
-                      <button 
-                        key={i} 
-                        onClick={() => setText(c)}
-                        className="text-[10px] bg-white/5 border border-white/10 px-3 py-1.5 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-all text-left"
-                      >
-                        {c}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {analysis.hashtags.map((h, i) => (
-                      <span key={i} className="text-[10px] text-cyan-400/60 font-mono">{h}</span>
-                    ))}
-                  </div>
-                </motion.div>
-              )}
+            <div className="relative rounded-3xl overflow-hidden border border-white/10 group">
+              {imgUrl && <img src={imgUrl} alt="Preview" className="w-full object-cover max-h-[400px]" />}
+              {videoUrl && <video src={videoUrl} controls className="w-full max-h-[400px]" />}
+              <button 
+                onClick={() => { setImgUrl(null); setVideoUrl(null); }}
+                className="absolute top-4 right-4 w-8 h-8 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-all"
+              >
+                <X size={16} />
+              </button>
             </div>
           )}
 
-          <div className="flex gap-3">
+          {analyzing && (
+            <div className="p-4 rounded-2xl bg-white/5 border border-white/10 flex items-center gap-3 animate-pulse">
+              <Loader2 className="animate-spin text-purple-400" size={18} />
+              <span className="text-xs text-white/40">AI analyzuje tvůj vizuál...</span>
+            </div>
+          )}
+
+          {analysis && !analyzing && (
+            <div className="p-4 rounded-2xl bg-purple-500/5 border border-purple-500/10 space-y-3">
+              <div className="flex items-center gap-2 text-purple-400">
+                <Brain size={14} />
+                <span className="text-[10px] font-bold uppercase tracking-widest">AI Analýza</span>
+              </div>
+              <p className="text-xs text-white/60 italic">"{analysis.description}"</p>
+              <div className="flex flex-wrap gap-2">
+                {analysis.hashtags.map(h => (
+                  <span key={h} className="text-[10px] text-purple-400/70 font-mono">{h}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-white/20 uppercase tracking-widest">AI Generátor</span>
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] text-white/30">Vysoká kvalita</span>
+                <button 
+                  onClick={() => setHighQuality(!highQuality)}
+                  className={`w-8 h-4 rounded-full relative transition-all ${highQuality ? 'bg-purple-500' : 'bg-white/10'}`}
+                >
+                  <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${highQuality ? 'left-4.5' : 'left-0.5'}`} />
+                </button>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <div className="flex-1 relative">
+                <input 
+                  value={aiPrompt}
+                  onChange={(e) => setAiPrompt(e.target.value)}
+                  placeholder="Popiš, co má AI vytvořit..."
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-xs text-white outline-none focus:border-purple-500/30 transition-all"
+                />
+                <Sparkles className="absolute right-4 top-3.5 text-white/20" size={14} />
+              </div>
+              <button 
+                onClick={handleGenerateImage}
+                disabled={genLoading || !aiPrompt}
+                className="px-6 rounded-2xl bg-white/5 border border-white/10 text-xs font-bold text-white hover:bg-white/10 transition-all disabled:opacity-30"
+              >
+                {genLoading ? <Loader2 className="animate-spin" size={16} /> : "Generovat"}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-6 bg-white/5 border-t border-white/5 flex items-center justify-between">
+          <div className="flex items-center gap-2">
             <button 
               onClick={() => imageInputRef.current?.click()}
-              disabled={uploading}
-              className="flex-1 py-3 rounded-xl border border-white/10 bg-white/5 text-white/40 hover:bg-white/10 transition-all flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-50"
+              className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-white/40 hover:text-purple-400 hover:border-purple-500/30 transition-all"
             >
-              {uploading ? <Loader2 size={16} className="animate-spin" /> : <Image size={16} />} 
-              Nahrát fotku
+              <Image size={20} />
             </button>
             <button 
               onClick={() => videoInputRef.current?.click()}
-              disabled={uploading}
-              className="flex-1 py-3 rounded-xl border border-white/10 bg-white/5 text-white/40 hover:bg-white/10 transition-all flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-50"
+              className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-white/40 hover:text-blue-400 hover:border-blue-500/30 transition-all"
             >
-              {uploading ? <Loader2 size={16} className="animate-spin" /> : <Video size={16} />} 
-              Nahrát video
+              <Video size={20} />
             </button>
-            <input type="file" ref={imageInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
-            <input type="file" ref={videoInputRef} className="hidden" accept="video/*" onChange={handleVideoUpload} />
+            <button 
+              onClick={handleAiCaption}
+              className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-white/40 hover:text-cyan-400 hover:border-cyan-500/30 transition-all"
+            >
+              <Type size={20} />
+            </button>
           </div>
 
-          <div className="bg-white/5 rounded-2xl border border-white/10 p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="text-[10px] font-bold text-purple-400 uppercase tracking-widest flex items-center gap-2">
-                <Mic size={12} /> Vocal Imprint (Biometrický podpis)
-              </div>
-              {vocalImprint && (
-                <span className="text-[9px] text-green-400 font-bold flex items-center gap-1">
-                  <Check size={10} /> Ověřeno
-                </span>
-              )}
-            </div>
-            
-            {isRecording ? (
-              <div className="flex flex-col gap-2">
-                <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                  <motion.div 
-                    initial={{ width: 0 }}
-                    animate={{ width: `${recordingProgress}%` }}
-                    className="h-full bg-purple-500"
-                  />
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-[8px] text-white/20 font-mono">NAHRÁVÁNÍ...</span>
-                  <span className="text-[8px] text-purple-400 font-mono">{Math.ceil((15 * recordingProgress) / 100)}s / 15s</span>
-                </div>
-              </div>
-            ) : (
-              <button
-                onClick={handleRecord}
-                className={`w-full py-3 rounded-xl border flex items-center justify-center gap-3 transition-all ${vocalImprint ? 'bg-green-500/10 border-green-500/50 text-green-400' : 'bg-white/5 border-white/10 text-white/40 hover:bg-white/10'}`}
-              >
-                {vocalImprint ? (
-                  <>
-                    <RefreshCw size={16} /> Přeměřit otisk
-                  </>
-                ) : (
-                  <>
-                    <Mic size={16} /> Nahrát 15s hlasový otisk
-                  </>
-                )}
-              </button>
-            )}
-          </div>
-
-          <div className="bg-white/5 rounded-2xl border border-white/10 p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="text-[10px] font-bold text-purple-400 uppercase tracking-widest flex items-center gap-2">
-                <Sparkles size={12} /> Generovat AI Obsah
-              </div>
-              <button 
-                onClick={() => setHighQuality(!highQuality)}
-                className={`text-[9px] font-bold px-2 py-1 rounded-md border transition-all ${highQuality ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400' : 'bg-white/5 border-white/10 text-white/20'}`}
-              >
-                {highQuality ? "✨ High Quality On" : "Standard Quality"}
-              </button>
-            </div>
-            <div className="flex flex-col gap-3">
-              <div className="flex gap-2">
-                <input
-                  value={aiPrompt}
-                  onChange={e => setAiPrompt(e.target.value)}
-                  placeholder="Popiš, co chceš vytvořit..."
-                  className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white text-xs outline-none focus:border-purple-500/30"
-                />
-                <button
-                  onClick={handleGenerateImage}
-                  disabled={genLoading || !aiPrompt.trim()}
-                  className="px-4 py-2 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-400 text-xs font-bold flex items-center gap-2 hover:bg-purple-500/20 disabled:opacity-50"
-                >
-                  {genLoading ? <Loader2 size={14} className="animate-spin" /> : <Image size={14} />}
-                  Obrázek
-                </button>
-                <button
-                  onClick={handleGenerateVideo}
-                  disabled={genLoading || !aiPrompt.trim()}
-                  className="px-4 py-2 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-xs font-bold flex items-center gap-2 hover:bg-cyan-500/20 disabled:opacity-50"
-                >
-                  {genLoading ? <Loader2 size={14} className="animate-spin" /> : <Video size={14} />}
-                  Video
-                </button>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <div className="flex-1 min-w-[140px]">
-                  <label className="text-[8px] font-bold text-white/20 uppercase tracking-widest mb-1 block">Styl</label>
-                  <select 
-                    value={aiStyle}
-                    onChange={e => setAiStyle(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-[10px] text-white/60 outline-none focus:border-purple-500/30"
-                  >
-                    <option value="none">Bez stylu</option>
-                    <option value="photorealistic">Fotorealistický</option>
-                    <option value="cartoon">Kreslený</option>
-                    <option value="abstract">Abstraktní</option>
-                    <option value="cyberpunk">Cyberpunk</option>
-                    <option value="oilpainting">Olejomalba</option>
-                  </select>
-                </div>
-                <div className="flex-1 min-w-[140px]">
-                  <label className="text-[8px] font-bold text-white/20 uppercase tracking-widest mb-1 block">Poměr stran</label>
-                  <div className="flex gap-1">
-                    {(["1:1", "16:9", "9:16", "4:3", "3:4"] as const).map(ratio => (
-                      <button
-                        key={ratio}
-                        onClick={() => setAiAspectRatio(ratio)}
-                        className={`flex-1 py-1.5 rounded-lg text-[9px] font-bold border transition-all ${aiAspectRatio === ratio ? 'bg-purple-500/20 border-purple-500/50 text-purple-400' : 'bg-white/5 border-white/10 text-white/30'}`}
-                      >
-                        {ratio}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <div className="text-[10px] font-bold text-white/20 uppercase tracking-widest mb-2 ml-1">Soukromí</div>
-              <select 
-                value={privacy}
-                onChange={e => setPrivacy(e.target.value as any)}
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-xs outline-none focus:border-purple-500/30 appearance-none"
-              >
-                <option value="public" className="bg-[#12121e]">Veřejný</option>
-                <option value="friends" className="bg-[#12121e]">Přátelé</option>
-                <option value="private" className="bg-[#12121e]">Soukromý</option>
-              </select>
-            </div>
-            {groups.length > 0 && (
-              <div className="flex-1">
-                <div className="text-[10px] font-bold text-white/20 uppercase tracking-widest mb-2 ml-1">Publikovat do skupiny</div>
-                <select 
-                  value={selectedGroupId || ""}
-                  onChange={e => setSelectedGroupId(e.target.value || null)}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-xs outline-none focus:border-purple-500/30 appearance-none"
-                >
-                  <option value="" className="bg-[#12121e]">Žádná skupina (Feed)</option>
-                  {groups.map(g => (
-                    <option key={g.id} value={g.id} className="bg-[#12121e]">{g.name}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </div>
-
-          <button
-            onClick={handlePost}
+          <button 
+            onClick={handleSubmit}
             disabled={!text.trim() && !imgUrl && !videoUrl}
-            className="w-full py-4 rounded-2xl bg-gradient-to-r from-purple-500 to-cyan-500 text-white font-bold text-sm shadow-xl hover:shadow-purple-500/20 transition-all disabled:opacity-50"
+            className="px-10 py-4 rounded-2xl bg-gradient-to-r from-purple-600 to-blue-600 text-white font-bold text-sm shadow-xl shadow-purple-500/20 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-30"
           >
-            Zveřejnit
+            Publikovat
           </button>
         </div>
+
+        <input type="file" ref={imageInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
+        <input type="file" ref={videoInputRef} onChange={handleVideoUpload} accept="video/*" className="hidden" />
       </motion.div>
-    </div>
+    </motion.div>
   );
 }
+
 
 /* ══════════════════════════════════════════════════════════
    POST CARD
 ══════════════════════════════════════════════════════════ */
-function PostCard({ post, currentUser, onUpdate, onSaveToLibrary }: { post: Post, currentUser: UserType, onUpdate: (p: Post) => void, onSaveToLibrary?: (item: any) => void }) {
+function PostCard({ post, currentUser, onUpdate, onSaveToLibrary, onAddNotification, groups = [] }: { post: Post, currentUser: UserType, onUpdate: (p: Post) => void, onSaveToLibrary?: (item: any) => void, onAddNotification?: (notif: Omit<BTSNotification, 'id' | 'timestamp' | 'read'>) => void, groups?: Group[] }) {
   const [showComments, setShowComments] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [expanded, setExpanded] = useState(false);
@@ -978,6 +1015,8 @@ function PostCard({ post, currentUser, onUpdate, onSaveToLibrary }: { post: Post
   const [summary, setSummary] = useState<string | null>(null);
 
   const isAuthor = post.authorId === currentUser.sub;
+  const group = groups.find(g => g.id === post.groupId);
+  const mentionedAI = post.mentionedAIId ? AI_MODELS[post.mentionedAIId as keyof typeof AI_MODELS] : null;
 
   const handleShare = async () => {
     const shareData = {
@@ -1070,6 +1109,17 @@ function PostCard({ post, currentUser, onUpdate, onSaveToLibrary }: { post: Post
     const c: Comment = { id: Date.now(), author: currentUser.name, text: commentText, time: ts() };
     onUpdate({ ...post, comments: [...post.comments, c] });
     setCommentText("");
+
+    if (onAddNotification && post.authorId !== currentUser.sub) {
+      onAddNotification({
+        userId: post.authorId,
+        type: "reply",
+        senderName: currentUser.name,
+        senderPic: currentUser.picture,
+        content: `${currentUser.name} okomentoval tvůj příspěvek.`,
+        link: `#post-${post.id}`
+      });
+    }
     
     try {
       await safeFetch('/api/comments', {
@@ -1096,7 +1146,7 @@ function PostCard({ post, currentUser, onUpdate, onSaveToLibrary }: { post: Post
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       id={`post-${post.id}`}
-      className="bg-[#12121e] rounded-3xl border border-white/10 overflow-hidden relative"
+      className="glass-dark rounded-[2rem] border border-white/10 overflow-hidden relative shadow-2xl"
     >
       {post.customStyle && (
         <style dangerouslySetInnerHTML={{ __html: `#post-${post.id} { ${post.customStyle} }` }} />
@@ -1107,9 +1157,19 @@ function PostCard({ post, currentUser, onUpdate, onSaveToLibrary }: { post: Post
           <div>
             <div className="flex items-center gap-2">
               <span className="text-sm font-bold text-white">{post.authorName}</span>
+              {group && (
+                <span className="text-[10px] text-purple-400 font-bold">
+                  ▸ {group.name}
+                </span>
+              )}
               <span className="text-[10px] text-white/30">
                 · {getRelativeTime(post.timestamp)}
               </span>
+              {mentionedAI && (
+                <span className="text-[10px] bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                  <span className="text-xs">{mentionedAI.icon}</span> {mentionedAI.name}
+                </span>
+              )}
               {post.type !== "post" && (
                 <span className="text-[8px] px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-white/40 uppercase font-bold tracking-widest">
                   {post.type}
@@ -1237,6 +1297,23 @@ function PostCard({ post, currentUser, onUpdate, onSaveToLibrary }: { post: Post
             </div>
             <div className="text-xs text-white/60 leading-relaxed italic">
               "{post.aiInsight}"
+            </div>
+          </div>
+        </div>
+      )}
+
+      {post.aiResponse && mentionedAI && (
+        <div className="px-4 py-4 bg-gradient-to-r from-purple-500/10 to-blue-500/10 border-y border-white/5 flex items-start gap-3 relative">
+          <div className="absolute top-0 right-4 -translate-y-1/2 px-2 py-0.5 rounded-full bg-purple-500 text-[8px] font-black uppercase tracking-[0.2em] text-white">AI Reply</div>
+          <div className="w-10 h-10 rounded-full flex items-center justify-center text-xl flex-shrink-0" style={{ backgroundColor: `${mentionedAI.color}20`, color: mentionedAI.color }}>
+            {mentionedAI.icon}
+          </div>
+          <div className="flex-1">
+            <div className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: mentionedAI.color }}>
+              {mentionedAI.name} <span className="text-white/20 ml-1">· {mentionedAI.desc}</span>
+            </div>
+            <div className="text-xs text-white/90 leading-relaxed bg-white/5 rounded-2xl p-3 border border-white/5">
+              <Markdown>{post.aiResponse}</Markdown>
             </div>
           </div>
         </div>
@@ -2595,7 +2672,7 @@ function GroupsView({ groups, onSelect, onCreate, onJoin }: { groups: Group[], o
 /* ══════════════════════════════════════════════════════════
    GROUP DETAIL VIEW
  ══════════════════════════════════════════════════════════ */
-function GroupDetailView({ group, user, onUpdatePost, onBack, onJoin, onLeave, onPost }: { group: Group, user: UserType, onUpdatePost: (p: Post) => void, onBack: () => void, onJoin: () => void, onLeave: () => void, onPost: (c: string, i: string | null, v: string | null) => void }) {
+function GroupDetailView({ group, user, onUpdatePost, onBack, onJoin, onLeave, onPost, onAddNotification, groups = [] }: { group: Group, user: UserType, onUpdatePost: (p: Post) => void, onBack: () => void, onJoin: () => void, onLeave: () => void, onPost: (c: string, i: string | null, v: string | null) => void, onAddNotification?: (notif: any) => void, groups?: Group[] }) {
   const [activeTab, setActiveTab] = useState("feed");
   const [members, setMembers] = useState<any[]>([]);
   const [groupPosts, setGroupPosts] = useState<Post[]>([]);
@@ -2730,7 +2807,7 @@ function GroupDetailView({ group, user, onUpdatePost, onBack, onJoin, onLeave, o
           )}
           {groupPosts.length > 0 ? (
             groupPosts.map(p => (
-              <PostCard key={p.id} post={p} currentUser={user} onUpdate={onUpdatePost} />
+              <PostCard key={p.id} post={p} currentUser={user} onUpdate={onUpdatePost} groups={groups} onAddNotification={onAddNotification} />
             ))
           ) : (
             <div className="py-20 text-center opacity-20">
@@ -3125,28 +3202,71 @@ function AccountSettings({ user, posts, onUpdateUser, onUpdatePost }: { user: Us
                   <AppLogo size={16} /> Nexus Autonomy Level
                 </div>
                 <p className="text-xs text-white/40 mb-6">Nastav úroveň nezávislosti tvých AI asistentů při generování obsahu.</p>
-                <input type="range" className="w-full accent-purple-500" />
-                <div className="flex justify-between mt-2 text-[10px] font-bold text-white/20 uppercase tracking-widest">
-                  <span>Nástroj</span>
-                  <span>Partner</span>
-                  <span>Autonomní</span>
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="100"
+                  value={user.aiAutonomy?.independenceLevel || 50}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value);
+                    onUpdateUser({
+                      ...user,
+                      aiAutonomy: { ...(user.aiAutonomy || { independenceLevel: 50, ethicalFilters: true, autonomousPosting: false, learningMode: true, vocalImprintSync: true }), independenceLevel: val }
+                    });
+                  }}
+                  className="w-full accent-purple-500 h-2 bg-white/10 rounded-lg appearance-none cursor-pointer" 
+                />
+                <div className="flex justify-between mt-4 text-[10px] font-bold text-white/20 uppercase tracking-widest">
+                  <span className={user.aiAutonomy?.independenceLevel! < 30 ? "text-purple-400" : ""}>Nástroj</span>
+                  <span className={user.aiAutonomy?.independenceLevel! >= 30 && user.aiAutonomy?.independenceLevel! < 70 ? "text-purple-400" : ""}>Partner</span>
+                  <span className={user.aiAutonomy?.independenceLevel! >= 70 ? "text-purple-400" : ""}>Autonomní</span>
                 </div>
               </div>
               
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {[
-                  { label: "Etický filtr", active: true },
-                  { label: "Auto-moderace", active: false },
-                  { label: "AI Odpovědi", active: true },
-                  { label: "Deep Analysis", active: true },
-                ].map(item => (
-                  <div key={item.label} className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between">
-                    <span className="text-xs font-bold text-white">{item.label}</span>
-                    <div className={`w-8 h-4 rounded-full relative ${item.active ? 'bg-cyan-500/20 border border-cyan-500/50' : 'bg-white/5 border border-white/10'}`}>
-                      <div className={`absolute top-0.5 w-2.5 h-2.5 rounded-full ${item.active ? 'right-0.5 bg-cyan-400' : 'left-0.5 bg-white/20'}`} />
+                  { key: "ethicalFilters", label: "Etický filtr", desc: "Aktivuje Tumbler Ridge protokol" },
+                  { key: "autonomousPosting", label: "Autonomní postování", desc: "AI může tvořit příspěvky" },
+                  { key: "learningMode", label: "Učící mód", desc: "AI se učí z tvých interakcí" },
+                  { key: "vocalImprintSync", label: "Vokální stopa", desc: "Synchronizace hlasového otisku" },
+                ].map(item => {
+                  const isActive = (user.aiAutonomy as any)?.[item.key] ?? false;
+                  return (
+                    <div 
+                      key={item.key} 
+                      onClick={() => {
+                        onUpdateUser({
+                          ...user,
+                          aiAutonomy: { 
+                            ...(user.aiAutonomy || { independenceLevel: 50, ethicalFilters: true, autonomousPosting: false, learningMode: true, vocalImprintSync: true }), 
+                            [item.key]: !isActive 
+                          }
+                        });
+                      }}
+                      className="bg-white/5 border border-white/10 rounded-2xl p-5 flex items-center justify-between cursor-pointer hover:bg-white/10 transition-all"
+                    >
+                      <div>
+                        <div className="text-xs font-bold text-white">{item.label}</div>
+                        <div className="text-[9px] text-white/30">{item.desc}</div>
+                      </div>
+                      <div className={`w-10 h-5 rounded-full relative transition-colors ${isActive ? 'bg-purple-500/20 border border-purple-500/50' : 'bg-white/5 border border-white/10'}`}>
+                        <div className={`absolute top-0.5 w-3 h-3 rounded-full transition-all ${isActive ? 'right-0.5 bg-purple-400' : 'left-0.5 bg-white/20'}`} />
+                      </div>
                     </div>
+                  );
+                })}
+              </div>
+
+              <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2 rounded-lg bg-yellow-500/10 text-yellow-500">
+                    <Shield size={18} />
                   </div>
-                ))}
+                  <div className="text-sm font-bold text-white">Bezpečnostní protokol</div>
+                </div>
+                <p className="text-[11px] text-white/40 leading-relaxed">
+                  Při nastavení úrovně <strong>Autonomní</strong> přebírá AI plnou zodpovědnost za digitální stopu v rámci sjednocené entity. Doporučujeme ponechat <strong>Etický filtr</strong> aktivní.
+                </p>
               </div>
             </div>
           )}
@@ -3166,7 +3286,7 @@ function AccountSettings({ user, posts, onUpdateUser, onUpdatePost }: { user: Us
 /* ══════════════════════════════════════════════════════════
    PROFILE VIEW
 ══════════════════════════════════════════════════════════ */
-function ProfileView({ user, posts, onUpdatePost, onUpdateUser, onChat }: { user: UserType, posts: Post[], onUpdatePost: (p: Post) => void, onUpdateUser: (u: UserType) => void, onChat: (ai: AIAssistant) => void }) {
+function ProfileView({ user, posts, onUpdatePost, onUpdateUser, onChat, onAddNotification, groups = [] }: { user: UserType, posts: Post[], onUpdatePost: (p: Post) => void, onUpdateUser: (u: UserType) => void, onChat: (ai: AIAssistant) => void, onAddNotification?: (notif: any) => void, groups?: Group[] }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState({ name: user.name, bio: user.bio || "", location: user.location || "" });
   const [activeTab, setActiveTab] = useState("Příspěvky");
@@ -3534,7 +3654,7 @@ function ProfileView({ user, posts, onUpdatePost, onUpdateUser, onChat }: { user
       {activeTab === "Příspěvky" && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {userPosts.length > 0 ? (
-            userPosts.map(p => <PostCard key={p.id} post={p} currentUser={user} onUpdate={onUpdatePost} onSaveToLibrary={() => {}} />)
+            userPosts.map(p => <PostCard key={p.id} post={p} currentUser={user} onUpdate={onUpdatePost} onSaveToLibrary={() => {}} groups={groups} onAddNotification={onAddNotification} />)
           ) : isNexusEmpty === null ? (
             <div className="md:col-span-2 bg-[#12121e] rounded-3xl border border-white/10 p-12 text-center flex flex-col items-center justify-center">
               <Loader2 className="animate-spin text-purple-500 mb-4" size={32} />
@@ -3988,6 +4108,37 @@ function ChatBotView({ assistant, user, onClose }: { assistant: AIAssistant, use
 export default function App() {
   const [user, setUser] = useState<UserType | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
+  const [postsError, setPostsError] = useState(false);
+
+  const fetchPosts = useCallback(async () => {
+    setPostsError(false);
+    const data = await safeFetch('/api/posts');
+    if (data) {
+      setPosts(prev => {
+        const apiPosts = data.map((p: any) => ({
+          ...p,
+          comments: [],
+          liked: false,
+          saved: false,
+          authorName: p.author_name || "Uživatel",
+          authorPic: p.author_pic || null,
+          timestamp: p.created_at ? new Date(p.created_at).getTime() : Date.now(),
+          aiInsight: p.ai_insight || null
+        }));
+        
+        // Merge: API posts take precedence, but keep local-only posts
+        const merged = [...apiPosts];
+        prev.forEach(p => {
+          if (!merged.find(ap => ap.id === p.id)) {
+            merged.push(p);
+          }
+        });
+        return merged;
+      });
+    } else {
+      setPostsError(true);
+    }
+  }, []);
 
   const [showCreate, setShowCreate] = useState(false);
   const [showMsg, setShowMsg] = useState(false);
@@ -4000,9 +4151,10 @@ export default function App() {
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [groups, setGroups] = useState<Group[]>([]);
   const [showSearch, setShowSearch] = useState(false);
+  const [showNotifs, setShowNotifs] = useState(false);
   const [activeChatBot, setActiveChatBot] = useState<AIAssistant | null>(null);
   const [draftText, setDraftText] = useState("");
-  const [notifs, setNotifs] = useState(3);
+  const { notifications, unreadCount, addNotification, markAsRead, markAllAsRead } = useNotifications(user?.id || user?.sub);
   const [library, setLibrary] = useState<LibraryItem[]>([]);
   const [smartSearchResult, setSmartSearchResult] = useState<{ text: string, sources: any[] } | null>(null);
   const [isSmartSearching, setIsSmartSearching] = useState(false);
@@ -4082,33 +4234,8 @@ export default function App() {
   };
 
   useEffect(() => {
-    safeFetch('/api/posts')
-      .then(data => {
-        if (data && data.length > 0) {
-          setPosts(prev => {
-            const apiPosts = data.map((p: any) => ({
-              ...p,
-              comments: [],
-              liked: false,
-              saved: false,
-              authorName: p.author_name || "Uživatel",
-              authorPic: p.author_pic || null,
-              timestamp: p.created_at ? new Date(p.created_at).getTime() : Date.now(),
-              aiInsight: p.ai_insight || null
-            }));
-            
-            // Merge: API posts take precedence, but keep local-only posts
-            const merged = [...apiPosts];
-            prev.forEach(p => {
-              if (!merged.find(ap => ap.id === p.id)) {
-                merged.push(p);
-              }
-            });
-            return merged;
-          });
-        }
-      });
-  }, []);
+    fetchPosts();
+  }, [fetchPosts]);
 
   const handleLogin = async (u: UserType) => {
     const defaultAssistants: AIAssistant[] = [
@@ -4119,14 +4246,30 @@ export default function App() {
     ];
 
     try {
-      const data = await safeFetch(`/api/users/${u.sub}`);
-      if (data) {
-        const assistants = data.aiAssistants ? JSON.parse(data.aiAssistants) : defaultAssistants;
-        const autonomy = data.aiAutonomy ? JSON.parse(data.aiAutonomy) : null;
-        setUser({ ...u, ...data, aiAssistants: assistants, aiAutonomy: autonomy });
+      // 1. Fetch user data from server
+      const serverData = await safeFetch(`/api/users/${u.sub}`);
+      
+      // 2. Load local data from Nexus (IndexedDB)
+      const localNexusData = await loadFromNexus("bts_protocol_data") || {};
+      
+      let finalUser = { ...u };
+      
+      if (serverData) {
+        const assistants = serverData.aiAssistants ? JSON.parse(serverData.aiAssistants) : defaultAssistants;
+        const autonomy = serverData.aiAutonomy ? JSON.parse(serverData.aiAutonomy) : null;
+        finalUser = { ...u, ...serverData, aiAssistants: assistants, aiAutonomy: autonomy };
+        
+        // Sync server data to Nexus
+        await saveToNexus("bts_protocol_data", { 
+          ...localNexusData, 
+          user: finalUser,
+          lastSync: Date.now() 
+        });
       } else {
+        // New user - check if we have something in Nexus to sync UP
         const newUser = { ...u, aiAssistants: defaultAssistants };
-        setUser(newUser);
+        finalUser = newUser;
+        
         await safeFetch('/api/users', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -4139,7 +4282,24 @@ export default function App() {
             aiAssistants: JSON.stringify(defaultAssistants)
           })
         });
+
+        await saveToNexus("bts_protocol_data", { 
+          ...localNexusData, 
+          user: finalUser,
+          lastSync: Date.now() 
+        });
       }
+
+      // 3. Sync Posts and Library between Nexus and Server
+      if (localNexusData.posts && localNexusData.posts.length > 0) {
+        // Logic to push local offline posts to server if needed
+        // For now, we refresh the main posts feed
+        fetchPosts();
+      }
+
+      setUser(finalUser);
+      console.log("BTS Protocol: Synchronizace s Nexusem dokončena.");
+      
     } catch (err) {
       console.error("Login sync failed", err);
       setUser({ ...u, aiAssistants: defaultAssistants });
@@ -4273,6 +4433,16 @@ export default function App() {
   const joinGroup = async (group: Group) => {
     if (!user) return;
     setGroups(prev => prev.map(g => g.id === group.id ? { ...g, isMember: true, memberCount: g.memberCount + 1 } : g));
+    
+    addNotification({
+      userId: user.sub,
+      type: "group_invite",
+      senderName: group.name,
+      senderPic: group.coverPhoto,
+      content: `Vítej v BTS skupině: ${group.name}!`,
+      link: "#"
+    });
+
     try {
       await safeFetch(`/api/groups/${group.id}/join`, {
         method: 'POST',
@@ -4334,6 +4504,8 @@ export default function App() {
       currentUser={user!} 
       onUpdate={updatePost} 
       onSaveToLibrary={saveToLibrary}
+      groups={groups}
+      onAddNotification={addNotification}
     />
   ));
 
@@ -4392,10 +4564,11 @@ export default function App() {
   if (!user) return <LoginScreen onLogin={handleLogin} />;
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white/90 font-sans selection:bg-purple-500/30">
+    <div className="min-h-screen flex flex-col relative overflow-hidden">
+      <div className="aura-bg" />
       
       {/* ── TOP NAV ── */}
-      <nav className="sticky top-0 z-50 bg-[#050505]/80 backdrop-blur-2xl border-b border-white/5 px-4 h-16 flex items-center justify-between gap-4">
+      <nav className="sticky top-0 z-50 glass-dark border-b border-white/5 px-4 h-16 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveTab("feed")}>
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-600/20 to-cyan-600/20 flex items-center justify-center shadow-lg border border-white/5">
             <AppLogo size={24} />
@@ -4451,10 +4624,28 @@ export default function App() {
             <Plus size={16} /> <span className="hidden sm:inline">Přidat</span>
           </button>
 
-          <button className="hidden sm:flex w-10 h-10 rounded-full bg-white/5 border border-white/10 items-center justify-center text-white/40 hover:text-white relative transition-all">
+          <button 
+            onClick={() => setShowNotifs(!showNotifs)}
+            className={`hidden sm:flex w-10 h-10 rounded-full border items-center justify-center transition-all relative ${showNotifs ? 'bg-purple-500/10 border-purple-500/50 text-purple-400' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'}`}
+          >
             <Bell size={18} />
-            {notifs > 0 && <span className="absolute top-2 right-2 w-4 h-4 rounded-full bg-pink-500 text-[8px] font-black flex items-center justify-center text-white">{notifs}</span>}
+            {unreadCount > 0 && (
+              <span className="absolute top-2 right-2 w-4 h-4 rounded-full bg-pink-500 text-[8px] font-black flex items-center justify-center text-white shadow-[0_0_8px_rgba(236,72,153,0.5)]">
+                {unreadCount}
+              </span>
+            )}
           </button>
+
+          <AnimatePresence>
+            {showNotifs && (
+              <NotificationCenter 
+                onClose={() => setShowNotifs(false)}
+                notifications={notifications}
+                onMarkRead={(id) => markAsRead(id)}
+                onMarkAllRead={markAllAsRead}
+              />
+            )}
+          </AnimatePresence>
 
           <button 
             onClick={() => setShowMsg(!showMsg)}
@@ -4498,7 +4689,7 @@ export default function App() {
         
         {/* ── LEFT SIDEBAR ── */}
         <aside className="hidden lg:flex flex-col gap-4 sticky top-20 h-fit">
-          <div className="bg-[#0f0f1a] rounded-3xl border border-white/10 p-6">
+          <div className="glass-dark rounded-3xl border border-white/10 p-6">
             <div className="flex items-center gap-4 mb-6">
               <Avatar name={user.name} pic={user.picture} size={56} online />
               <div>
@@ -4519,7 +4710,7 @@ export default function App() {
             </div>
           </div>
 
-          <nav className="bg-[#0f0f1a] rounded-3xl border border-white/10 p-2 flex flex-col gap-4">
+          <nav className="glass-dark rounded-3xl border border-white/10 p-2 flex flex-col gap-4">
             {navGroups.map((group) => (
               <div key={group.title} className="flex flex-col gap-1">
                 <div className="px-4 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-white/20">
@@ -4563,6 +4754,8 @@ export default function App() {
               onChat={(ai) => {
                 setActiveChatBot(ai);
               }}
+              groups={groups}
+              onAddNotification={addNotification}
             />
           ) : activeTab === "groups" ? (
             selectedGroup ? (
@@ -4573,6 +4766,8 @@ export default function App() {
                 onBack={() => setSelectedGroup(null)}
                 onJoin={() => joinGroup(selectedGroup)}
                 onLeave={() => leaveGroup(selectedGroup)}
+                groups={groups}
+                onAddNotification={addNotification}
                 onPost={(content, image, video) => addPost({
                   id: Date.now(),
                   authorId: user.sub,
@@ -4758,6 +4953,21 @@ export default function App() {
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {postsError && (
+                      <div className="md:col-span-2 bg-red-500/10 border border-red-500/20 rounded-3xl p-8 flex flex-col items-center justify-center gap-4 text-center">
+                        <ShieldAlert size={48} className="text-red-400 opacity-50" />
+                        <div>
+                          <h3 className="text-white font-bold">Chyba spojení s Nexusem</h3>
+                          <p className="text-xs text-white/40 mt-1">Nepodařilo se načíst příspěvky z protokolu.</p>
+                        </div>
+                        <button 
+                          onClick={fetchPosts}
+                          className="bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl px-6 py-2 text-xs font-bold text-white transition-all flex items-center gap-2"
+                        >
+                          <RefreshCw size={14} /> Zkusit znovu
+                        </button>
+                      </div>
+                    )}
                     {renderPosts(filteredPosts)}
                     {filteredPosts.length === 0 && (
                       <div className="md:col-span-2 text-center py-20 opacity-20">
@@ -4905,7 +5115,7 @@ export default function App() {
 
         {/* ── RIGHT SIDEBAR ── */}
         <aside className="hidden md:flex flex-col gap-4 sticky top-20 h-[calc(100vh-100px)]">
-          <div className="bg-[#12121e] rounded-3xl border border-white/10 p-6 hidden lg:block">
+          <div className="glass-dark rounded-3xl border border-white/10 p-6 hidden lg:block">
             <h4 className="text-[10px] font-bold text-white/20 uppercase tracking-widest mb-4 flex items-center justify-between">
               Trending <TrendingUp size={12} />
             </h4>
@@ -4924,7 +5134,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="bg-[#12121e] rounded-3xl border border-white/10 p-6">
+          <div className="glass-dark rounded-3xl border border-white/10 p-6">
             <h4 className="text-[10px] font-bold text-white/20 uppercase tracking-widest mb-4">Online Přátelé</h4>
             <div className="flex flex-col gap-4">
               {friends.map(f => (
@@ -4948,7 +5158,7 @@ export default function App() {
       </main>
 
       {/* ── MOBILE BOTTOM NAV ── */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#0a0a12]/80 backdrop-blur-2xl border-t border-white/5 px-6 h-20 flex items-center justify-between">
+      <div className="lg:hidden fixed bottom-4 left-4 right-4 z-50 glass-dark rounded-3xl border border-white/10 px-6 h-16 flex items-center justify-between shadow-2xl">
         {[
           { id: "feed", icon: Home, label: "Feed" },
           { id: "studio", icon: Sparkles, label: "Studio" },
@@ -4957,9 +5167,9 @@ export default function App() {
           <button 
             key={id} 
             onClick={() => setActiveTab(id)}
-            className={`flex flex-col items-center gap-1 transition-all ${activeTab === id ? 'text-purple-400' : 'text-white/30'}`}
+            className={`flex flex-col items-center gap-1 transition-all ${activeTab === id ? 'text-purple-400 scale-110' : 'text-white/30'}`}
           >
-            <Icon size={22} />
+            <Icon size={20} />
             <span className="text-[8px] font-bold uppercase tracking-widest">{label}</span>
           </button>
         ))}
@@ -4977,6 +5187,7 @@ export default function App() {
               setDraftText("");
             }} 
             onPost={(p) => addPost(p)} 
+            onAddNotification={addNotification}
           />
         )}
       </AnimatePresence>
