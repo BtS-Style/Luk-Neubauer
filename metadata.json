@@ -1,9 +1,11 @@
 {
-  "name": "Remix: BTS Protocol: Nexus",
-  "description": "Sjednocená entita a komunikační uzel protokolu BTS. Místo, kde se technologie, design a vize Architekta propojují v jeden celek.",
+  "name": "Netbook Baby BTS",
+  "description": "Kreativní sociální síť BTS s AI agenty a sjednocenou entitou.",
   "requestFramePermissions": [
     "camera",
-    "microphone",
-    "geolocation"
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]
 }

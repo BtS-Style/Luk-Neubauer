@@ -1,19 +1,82 @@
-export interface LibraryItem {
-  id: string;
-  type: "image" | "video" | "audio" | "file";
-  category: "ai-generated" | "photos" | "music" | "other";
-  url: string;
+export interface User {
+  id?: string;
+  sub?: string;
+  name?: string;
+  picture?: string;
+  email?: string;
+  bio?: string;
+}
+
+export interface Post {
+  id: string | number;
+  authorName: string;
+  authorPic?: string;
+  content: string;
+  image?: string;
+  video?: string;
+  isReel?: boolean;
+  videoEdits?: {
+    trimStart: number;
+    trimEnd: number;
+    volume: number;
+    musicTrack?: string;
+    uploadedAudioName?: string;
+  };
+  timestamp: number;
+  likes: number;
+  comments: Comment[];
+  groupId?: string | null;
+  aiResponse?: string;
+  vocalImprint?: string;
+}
+
+export interface Comment {
+  id: string | number;
+  authorName: string;
+  authorPic?: string;
+  content: string;
+  timestamp: number;
+}
+
+export interface Story {
+  id: string | number;
+  userName: string;
+  userPic: string;
+  imageUrl: string;
+  timestamp: number;
+}
+
+export interface Friend {
+  id: string | number;
   name: string;
+  picture: string;
+  status: "online" | "offline";
+  isAI?: boolean;
+}
+
+export interface LibraryItem {
+  id: string | number;
+  title: string;
+  type: string;
+  content: any;
   timestamp: number;
 }
 
 export interface AIAssistant {
   id: string;
   name: string;
-  role: string;
+  desc: string;
   avatar: string;
-  status: "active" | "idle" | "learning";
-  model: "gemini" | "grok" | "gpt" | "claude";
+  color: string;
+}
+
+export interface Group {
+  id: string;
+  name: string;
+  desc: string;
+  coverPhoto: string;
+  memberCount: number;
+  isMember: boolean;
 }
 
 export interface AIAutonomySettings {
@@ -22,6 +85,8 @@ export interface AIAutonomySettings {
   autonomousPosting: boolean;
   learningMode: boolean;
   vocalImprintSync: boolean;
+  temperature: number; // 0-1
+  maxTokens: number;
 }
 
 export interface BTSNotification {
@@ -34,92 +99,4 @@ export interface BTSNotification {
   link?: string;
   read: boolean;
   timestamp: number;
-}
-
-export interface User {
-  id?: string;
-  name: string;
-  email: string;
-  picture: string | null;
-  coverPhoto?: string | null;
-  bio?: string;
-  location?: string;
-  sub: string;
-  provider: string;
-  stats?: {
-    posts: number;
-    friends: number;
-    followers: number;
-    following: number;
-    aiInteractions: number;
-  };
-  library?: LibraryItem[];
-  aiAssistants?: AIAssistant[];
-  aiAutonomy?: AIAutonomySettings;
-}
-
-export interface Post {
-  id: string | number;
-  authorId: string;
-  authorName: string;
-  authorPic: string | null;
-  content: string;
-  image: string | null;
-  video?: string | null;
-  type: "post" | "reel" | "story";
-  likes: number;
-  comments: Comment[];
-  shares: number;
-  saved: boolean;
-  liked: boolean;
-  time: string;
-  timestamp: number;
-  duration?: number; // in seconds
-  privacy: "public" | "friends" | "private";
-  vocalImprint?: string | null;
-  aiInsight?: string | null;
-  groupId?: string | null;
-  mentionedAIId?: string | null;
-  aiResponse?: string | null;
-  customStyle?: string | null;
-  files?: { name: string; type: string; url: string | null }[];
-}
-
-export interface Group {
-  id: string;
-  name: string;
-  description: string;
-  coverPhoto: string | null;
-  adminId: string;
-  memberCount: number;
-  isMember?: boolean;
-  createdAt: string;
-}
-
-export interface GroupMember {
-  userId: string;
-  groupId: string;
-  role: "admin" | "member";
-  joinedAt: string;
-}
-
-export interface Comment {
-  id: string | number;
-  author: string;
-  text: string;
-  time: string;
-}
-
-export interface Story {
-  id: number;
-  name: string;
-  color: string;
-  emoji: string;
-}
-
-export interface Friend {
-  id: string;
-  name: string;
-  status: string;
-  color: string;
 }
